@@ -3,7 +3,9 @@ package relationtuple
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 
 	rts "github.com/ory/keto/proto/ory/keto/relation_tuples/v1alpha2"
 
@@ -118,12 +120,78 @@ func (h *handler) getRelations(w http.ResponseWriter, r *http.Request, _ httprou
 		h.d.Writer().WriteError(w, r, herodot.ErrBadRequest.WithError(err.Error()))
 		return
 	}
-
-	l := h.d.Logger()
-	for k := range q {
-		l = l.WithField(k, q.Get(k))
+	resp, err := h.fetchRelationship(q, query)
+	if err != nil {
+		h.d.Writer().WriteError(w, r, herodot.ErrBadRequest.WithError(err.Error()))
+		return
 	}
-	l.Debug("querying relation tuples")
+
+	if len(resp.RelationTuples) == 0 {
+		h.d.Writer().Write(w, r, resp)
+		return
+	}
+
+	if userPermissions := q.Get("up"); userPermissions == "all" {
+		// get permission role
+		resp, err = h.findPermissions(resp)
+		if err != nil {
+			h.d.Writer().WriteError(w, r, herodot.ErrBadRequest.WithError(err.Error()))
+			return
+		}
+		// get all role permissions
+		resp, err = h.findPermissions(resp)
+		if err != nil {
+			h.d.Writer().WriteError(w, r, herodot.ErrBadRequest.WithError(err.Error()))
+			return
+		}
+	}
+	h.d.Writer().Write(w, r, resp)
+}
+
+func (h *handler) findPermissions(resp *GetResponse) (*GetResponse, error) {
+	var result = new(GetResponse)
+	for _, r := range resp.RelationTuples {
+		urlValues := url.Values{
+			"subject_set.namespace": {r.Namespace},
+			"subject_set.relation":  {r.Relation},
+			"subject_set.object":    {r.Object},
+		}
+		query, err := (&RelationQuery{}).FromURLQuery(urlValues)
+		if err != nil {
+			return nil, err
+		}
+		rel, err := h.fetchRelationship(urlValues, query)
+		if err != nil {
+			return nil, err
+		}
+		if len(rel.RelationTuples) == 0 {
+			result.RelationTuples = append(result.RelationTuples, r)
+			continue
+		}
+
+		result.RelationTuples = append(result.RelationTuples, rel.RelationTuples...)
+	}
+	return result, nil
+}
+
+func (h *handler) fetchRelationship(q url.Values, query *RelationQuery) (*GetResponse, error) {
+	var arrQuery []*RelationQuery
+	if query.SubjectSet != nil {
+		if subjectSetArr := strings.Split(query.SubjectSet.Object, ","); len(subjectSetArr) > 0 {
+			for _, val := range subjectSetArr {
+				var t = new(RelationQuery)
+				t.Namespace = query.Namespace
+				t.Object = query.Object
+				t.Relation = query.Relation
+				t.SubjectID = query.SubjectID
+				t.SubjectSet = new(SubjectSet)
+				t.SubjectSet.Namespace = query.SubjectSet.Namespace
+				t.SubjectSet.Relation = query.SubjectSet.Relation
+				t.SubjectSet.Object = val
+				arrQuery = append(arrQuery, t)
+			}
+		}
+	}
 
 	var paginationOpts []x.PaginationOptionSetter
 	if pageToken := q.Get("page_token"); pageToken != "" {
@@ -133,22 +201,37 @@ func (h *handler) getRelations(w http.ResponseWriter, r *http.Request, _ httprou
 	if pageSize := q.Get("page_size"); pageSize != "" {
 		s, err := strconv.ParseInt(pageSize, 0, 0)
 		if err != nil {
-			h.d.Writer().WriteError(w, r, herodot.ErrBadRequest.WithError(err.Error()))
-			return
+			return nil, err
 		}
 		paginationOpts = append(paginationOpts, x.WithSize(int(s)))
+	} else {
+		// set default pagination
+		paginationOpts = append(paginationOpts, x.WithSize(1000))
 	}
 
-	rels, nextPage, err := h.d.RelationTupleManager().GetRelationTuples(r.Context(), query, paginationOpts...)
-	if err != nil {
-		h.d.Writer().WriteError(w, r, err)
-		return
+	if len(arrQuery) == 0 {
+		rels, nextPage, err := h.d.RelationTupleManager().GetRelationTuples(context.Background(), query, paginationOpts...)
+		if err != nil {
+			return nil, err
+		}
+		resp := &GetResponse{
+			RelationTuples: rels,
+			NextPageToken:  nextPage,
+		}
+		return resp, nil
 	}
 
+	var rels []*InternalRelationTuple
+	for _, q := range arrQuery {
+		tmp, _, err := h.d.RelationTupleManager().GetRelationTuples(context.Background(), q, paginationOpts...)
+		if err != nil {
+			return nil, err
+		}
+		rels = append(rels, tmp...)
+	}
 	resp := &GetResponse{
 		RelationTuples: rels,
-		NextPageToken:  nextPage,
+		NextPageToken:  "",
 	}
-
-	h.d.Writer().Write(w, r, resp)
+	return resp, nil
 }

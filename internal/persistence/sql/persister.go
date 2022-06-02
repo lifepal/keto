@@ -12,8 +12,8 @@ import (
 	"github.com/ory/x/fsx"
 	"github.com/ory/x/logrusx"
 	"github.com/ory/x/networkx"
+	"github.com/ory/x/otelx"
 	"github.com/ory/x/popx"
-	"github.com/ory/x/tracing"
 	"github.com/pkg/errors"
 
 	"github.com/ory/keto/internal/driver/config"
@@ -46,7 +46,7 @@ const (
 
 var (
 	//go:embed migrations/sql/*.sql
-	migrations embed.FS
+	Migrations embed.FS
 
 	_ persistence.Persister = &Persister{}
 )
@@ -66,8 +66,8 @@ func NewPersister(ctx context.Context, reg dependencies, nid uuid.UUID) (*Persis
 	return p, nil
 }
 
-func NewMigrationBox(c *pop.Connection, logger *logrusx.Logger, tracer *tracing.Tracer) (*popx.MigrationBox, error) {
-	return popx.NewMigrationBox(fsx.Merge(migrations, networkx.Migrations), popx.NewMigrator(c, logger, tracer, 0))
+func NewMigrationBox(c *pop.Connection, logger *logrusx.Logger, tracer *otelx.Tracer) (*popx.MigrationBox, error) {
+	return popx.NewMigrationBox(fsx.Merge(Migrations, networkx.Migrations), popx.NewMigrator(c, logger, tracer, 0))
 }
 
 func (p *Persister) Connection(ctx context.Context) *pop.Connection {

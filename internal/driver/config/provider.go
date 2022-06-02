@@ -7,25 +7,19 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/ory/jsonschema/v3"
-	"github.com/ory/x/cmdx"
-
 	"github.com/ory/keto/embedx"
 
 	"github.com/ory/herodot"
-
-	"github.com/ory/x/watcherx"
-
-	"github.com/ory/keto/internal/namespace"
-
 	_ "github.com/ory/jsonschema/v3/httploader"
 	"github.com/ory/x/configx"
+	"github.com/ory/x/logrusx"
+	"github.com/ory/x/otelx"
+	"github.com/ory/x/watcherx"
 	"github.com/pkg/errors"
 	"github.com/rs/cors"
 	"github.com/spf13/pflag"
 
-	"github.com/ory/x/logrusx"
-	"github.com/ory/x/tracing"
+	"github.com/ory/keto/internal/namespace"
 )
 
 const (
@@ -94,10 +88,7 @@ func NewProvider(ctx context.Context, flags *pflag.FlagSet, config *Config, opts
 			configx.AttachWatcher(config.watcher),
 		)...,
 	)
-	if validationErr := new(jsonschema.ValidationError); errors.As(err, &validationErr) {
-		// the configx provider already printed the validation error
-		return nil, cmdx.ErrNoPrintButFail
-	} else if err != nil {
+	if err != nil {
 		return nil, err
 	}
 
@@ -202,15 +193,15 @@ func (k *Config) DSN() string {
 }
 
 func (k *Config) TracingServiceName() string {
-	return k.p.StringF("tracing.service_name", "ORY Keto")
+	return k.p.StringF("tracing.service_name", "Ory Keto")
 }
 
 func (k *Config) TracingProvider() string {
 	return k.p.StringF("tracing.provider", "")
 }
 
-func (k *Config) TracingConfig() *tracing.Config {
-	return k.p.TracingConfig("ORY Keto")
+func (k *Config) TracingConfig() *otelx.Config {
+	return k.p.TracingConfig("Ory Keto")
 }
 
 func (k *Config) NamespaceManager() (namespace.Manager, error) {

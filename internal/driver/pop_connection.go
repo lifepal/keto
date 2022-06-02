@@ -7,7 +7,7 @@ import (
 	"github.com/cenkalti/backoff/v3"
 	"github.com/gobuffalo/pop/v6"
 	"github.com/luna-duclos/instrumentedsql"
-	"github.com/luna-duclos/instrumentedsql/opentracing"
+	otelsql "github.com/ory/x/otelx/sql"
 	"github.com/ory/x/sqlcon"
 	"github.com/pkg/errors"
 )
@@ -18,7 +18,7 @@ func (r *RegistryDefault) PopConnectionWithOpts(ctx context.Context, popOpts ...
 	var opts []instrumentedsql.Opt
 	if tracer.IsLoaded() {
 		opts = []instrumentedsql.Opt{
-			instrumentedsql.WithTracer(opentracing.NewTracer(true)),
+			instrumentedsql.WithTracer(otelsql.NewTracer()),
 			instrumentedsql.WithOmitArgs(),
 		}
 	}
@@ -62,6 +62,12 @@ func (r *RegistryDefault) PopConnectionWithOpts(ctx context.Context, popOpts ...
 	}, bc); err != nil {
 		return nil, errors.WithStack(err)
 	}
+
+	// Close this connection when the context is closed.
+	go func() {
+		<-ctx.Done()
+		conn.Close()
+	}()
 
 	return conn.WithContext(ctx), nil
 }
